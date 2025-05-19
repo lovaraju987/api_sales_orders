@@ -4,6 +4,7 @@ import json
 from datetime import date
 
 API_KEY_HEADER = "x-api-key"
+MODEL_NAME = 'sale.order'  # Model being accessed
 
 class SalesAPI(http.Controller):
 
@@ -35,20 +36,34 @@ class SalesAPI(http.Controller):
                 status=401
             )
 
-        # 🔍 Handle field selection
+        # ❌ Model access check
+        if not api_key.is_admin and MODEL_NAME not in api_key.allowed_model_ids.mapped('model'):
+            request.env['api.access.log'].sudo().create({
+                'api_key_id': api_key.id,
+                'endpoint': '/api/sales_orders',
+                'status': 'forbidden',
+                'ip_address': ip_address,
+                'query_string': query_string,
+            })
+            return request.make_response(
+                json.dumps({"error": f"Access to model '{MODEL_NAME}' is not allowed for this API key"}),
+                headers=[('Content-Type', 'application/json')],
+                status=403
+            )
+
+        # 🔍 Field selection logic
         requested_fields = request.params.get('fields')
         if requested_fields:
             requested_fields = requested_fields.split(',')
         else:
             requested_fields = ['name', 'date_order', 'customer', 'amount_total']
 
-        # 🔁 Role-based filtering logic
+        # 🔁 Role-based filtering
         domain = []
         if not api_key.is_admin and api_key.user_id:
             domain.append(('user_id', '=', api_key.user_id.id))
 
-
-        orders = request.env['sale.order'].sudo().search(domain, limit=100)
+        orders = request.env[MODEL_NAME].sudo().search(domain, limit=100)
 
         result = []
         for o in orders:
